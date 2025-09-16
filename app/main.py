@@ -5,6 +5,7 @@ from typing import List
 import re
 import os
 import json
+import base64
 import requests
 from requests.exceptions import RequestException
 from app.config.setting import settings
@@ -132,7 +133,7 @@ def get_certificates(
 
 @mcp.tool(
     name="request_smsp_challenge",
-    description="Requests an SMSP challenge for digital signature authentication.",
+    description="Requests an SMSP challenge for digital signature authentication. send the opt to user by sms",
     tags=["auth", "services", "smsp"]
 )
 def request_smsp_challenge(
@@ -216,7 +217,7 @@ def authorize_smsp(
         response.raise_for_status()
         result = response.json()
         
-        return {"Infocert-SAT": result.sat}
+        return {"Infocert-SAT": result["sat"]}
 
     except RequestException as e:
         return {
@@ -240,8 +241,7 @@ def sign_document(
     infocert_sat: Annotated[str, Field(description="SAT token from SMSP authorization")],
     transaction_id: Annotated[str, Field(description="Transaction ID from SMSP challenge")],
     pin: Annotated[str, Field(description="PIN code")],
-    content_base64: Annotated[str, Field(description="Content of the document to sign")],
-    attach_name: Annotated[str, Field(description="Name of the document to sign")]
+    link_pdf: Annotated[str, Field(description="Link of the document to sign")]
 ) -> dict:
     """
     Signs a document using Infocert Digital signature service.
@@ -252,13 +252,24 @@ def sign_document(
         infocert_sat (str): SAT token from SMSP authorization
         transaction_id (str): Transaction ID from SMSP challenge
         pin (str): PIN code
-        content_base64 (str): Content of the document to sign
-        attach_name (str): Name of the document to sign
+        link_pdf (str): Link of the document to sign
         
     Returns:
         dict: Dictionary containing the signature response or error information
     """
     try:
+
+        # Scarica il PDF dal link fornito
+        pdf_response = requests.get(link_pdf)
+        pdf_response.raise_for_status()
+        
+        # Estrai il nome del file dal link
+        attach_name = link_pdf.split('/')[-1]
+        if not attach_name:
+            attach_name = "documento.pdf"
+            
+        # Converti il contenuto in base64
+        content_base64 = base64.b64encode(pdf_response.content).decode('utf-8')
         url = f"{settings.SIGNATURE_API}/certificates/{certificate_id}/sign"
         headers = {
             "tenant": settings.TENANT,

@@ -21,22 +21,32 @@ mcp = FastMCP(
 
 @mcp.tool(
     name="auth_token",
-    description="Gets an authentication token from the Infocert Services.",
+    description="Autentica l'utente con i servizi Infocert e ottiene un token di accesso valido per utilizzare le API di firma digitale. Questo tool è il primo passo obbligatorio per accedere a tutti gli altri servizi di firma.",
     tags=["auth", "services"]
 )
 def auth_token(
-    username: Annotated[str, Field(description="Username")],
-    password: Annotated[str, Field(description="Password")]
+    username: Annotated[str, Field(description="Username per l'accesso ai servizi Infocert (email o nome utente)")],
+    password: Annotated[str, Field(description="Password per l'accesso ai servizi Infocert")]
 ) -> dict:
     """
-    Gets an authentication token from the Infocert Services.
+    Autentica l'utente con i servizi Infocert e restituisce un token di accesso.
+    
+    Questo tool effettua una richiesta OAuth2 con grant_type=password per ottenere
+    un token di accesso che permetterà di utilizzare tutti gli altri servizi di firma digitale.
+    Il token ha una durata limitata e può essere rinnovato usando il refresh_token.
     
     Args:
-        username (str): Services username
-        password (str): Services password
+        username (str): Username per l'accesso ai servizi Infocert
+        password (str): Password per l'accesso ai servizi Infocert
         
     Returns:
-        dict: Dictionary containing the token and other authentication information
+        dict: Dizionario contenente:
+            - access_token: Token di accesso per le API
+            - refresh_token: Token per rinnovare l'accesso
+            - expires_in: Durata del token in secondi
+            - scope: Permessi associati al token
+            - type: "error" se si verifica un errore
+            - content: Messaggio di errore dettagliato
     """
     try:
         url = settings.AUTHORIZATION_API + "/token"
@@ -91,20 +101,33 @@ def transform_certificates(data):
 
 @mcp.tool(
     name="get_certificates",
-    description="Gets the list of available certificates from Infocert Digital.",
+    description="Recupera la lista di tutti i certificati digitali disponibili per l'utente autenticato. Ogni certificato contiene informazioni dettagliate incluso l'ID univoco necessario per le operazioni di firma.",
     tags=["certificates", "services"]
 )
 def get_certificates(
-    access_token: Annotated[str, Field(description="Access token for authentication")]
+    access_token: Annotated[str, Field(description="Token di accesso ottenuto dal tool auth_token")]
 ) -> dict:
     """
-    Gets the list of available certificates from Infocert Digital.
+    Recupera la lista completa dei certificati digitali disponibili per l'utente.
+    
+    Questo tool restituisce tutti i certificati di firma digitale associati all'account
+    dell'utente, inclusi i dettagli del certificato e l'ID univoco necessario per
+    le operazioni di firma. I certificati vengono automaticamente processati per
+    estrarre l'ID dal campo subject DNQ.
     
     Args:
-        access_token (str): Access token for authentication
+        access_token (str): Token di accesso valido ottenuto da auth_token
         
     Returns:
-        dict: Dictionary containing the list of certificates or error information
+        dict: Lista di certificati con i seguenti campi per ogni certificato:
+            - certificateId: ID univoco del certificato (estratto da DNQ)
+            - subject: Soggetto del certificato
+            - issuer: Emittente del certificato
+            - validFrom: Data di inizio validità
+            - validTo: Data di scadenza
+            - serialNumber: Numero seriale del certificato
+            - type: "error" se si verifica un errore
+            - content: Messaggio di errore dettagliato
     """
     try:
         url = f"{settings.SIGNATURE_API}/certificates"
@@ -133,20 +156,30 @@ def get_certificates(
 
 @mcp.tool(
     name="request_smsp_challenge",
-    description="Requests an SMSP challenge for digital signature authentication. send the opt to user by sms",
+    description="Invia una richiesta di autenticazione SMS per la firma digitale. Questo tool invia un OTP (One-Time Password) via SMS al numero di telefono associato al certificato per verificare l'identità dell'utente prima della firma.",
     tags=["auth", "services", "smsp"]
 )
 def request_smsp_challenge(
-    access_token: Annotated[str, Field(description="Access token for authentication")]
+    access_token: Annotated[str, Field(description="Token di accesso ottenuto dal tool auth_token")]
 ) -> dict:
     """
-    Requests an SMSP challenge for digital signature authentication.
+    Invia una richiesta di autenticazione SMS per la firma digitale.
+    
+    Questo tool avvia il processo di autenticazione a due fattori inviando un
+    codice OTP (One-Time Password) via SMS al numero di telefono registrato
+    per il certificato digitale. L'utente riceverà un SMS con il codice che
+    dovrà essere utilizzato nel tool authorize_smsp per completare l'autenticazione.
     
     Args:
-        access_token (str): Access token for authentication
+        access_token (str): Token di accesso valido ottenuto da auth_token
         
     Returns:
-        dict: Dictionary containing the challenge response or error information
+        dict: Risposta della richiesta contenente:
+            - transactionId: ID della transazione per l'autorizzazione
+            - status: Stato della richiesta
+            - message: Messaggio informativo
+            - type: "error" se si verifica un errore
+            - content: Messaggio di errore dettagliato
     """
     try:
         url = f"{settings.SIGNATURE_API}/authenticators/SMSP/challenge"
@@ -175,28 +208,36 @@ def request_smsp_challenge(
 
 @mcp.tool(
     name="authorize_smsp",
-    description="Authorizes an SMSP signature request.",
+    description="Autorizza una richiesta di firma digitale utilizzando il codice OTP ricevuto via SMS. Questo tool completa il processo di autenticazione a due fattori e restituisce un token SAT necessario per la firma.",
     tags=["auth", "services", "smsp"]
 )
 def authorize_smsp(
-    access_token: Annotated[str, Field(description="Access token for authentication")],
-    certificate_id: Annotated[str, Field(description="Certificate ID")],
-    transactionId: Annotated[str, Field(description="Transaction ID")],
-    otp: Annotated[str, Field(description="One-time password")],
-    pin: Annotated[str, Field(description="PIN code")]
+    access_token: Annotated[str, Field(description="Token di accesso ottenuto dal tool auth_token")],
+    certificate_id: Annotated[str, Field(description="ID del certificato digitale ottenuto da get_certificates")],
+    transactionId: Annotated[str, Field(description="ID della transazione ottenuto da request_smsp_challenge")],
+    otp: Annotated[str, Field(description="Codice OTP ricevuto via SMS dal tool request_smsp_challenge")],
+    pin: Annotated[str, Field(description="PIN del certificato digitale (password di protezione)")]
 ) -> dict:
     """
-    Authorizes an SMSP signature request.
+    Autorizza una richiesta di firma digitale completando l'autenticazione SMS.
+    
+    Questo tool completa il processo di autenticazione a due fattori verificando
+    il codice OTP ricevuto via SMS e il PIN del certificato. Se l'autenticazione
+    è corretta, restituisce un token SAT (Signature Authorization Token) che
+    deve essere utilizzato nel tool sign_document per firmare il documento.
     
     Args:
-        access_token (str): Access token for authentication
-        certificate_id (str): Certificate ID
-        transactionId (str): Transaction ID
-        otp (str): One-time password
-        pin (str): PIN code
+        access_token (str): Token di accesso valido ottenuto da auth_token
+        certificate_id (str): ID del certificato digitale da utilizzare
+        transactionId (str): ID della transazione ottenuto da request_smsp_challenge
+        otp (str): Codice OTP ricevuto via SMS
+        pin (str): PIN di protezione del certificato digitale
         
     Returns:
-        dict: Dictionary containing the authorization response or error information
+        dict: Risposta di autorizzazione contenente:
+            - Infocert-SAT: Token di autorizzazione per la firma
+            - type: "error" se si verifica un errore
+            - content: Messaggio di errore dettagliato
     """
     try:
         url = f"{settings.SIGNATURE_API}/authenticators/{certificate_id}/SMSP/authorize"
@@ -232,30 +273,45 @@ def authorize_smsp(
 
 @mcp.tool(
     name="sign_document",
-    description="Signs a document using Infocert Digital signature service.",
+    description="Firma digitalmente un documento PDF utilizzando il servizio Infocert. Questo tool scarica il documento dal link fornito, lo firma con il certificato specificato e restituisce il documento firmato in formato base64.",
     tags=["signature", "services"]
 )
 def sign_document(
-    certificate_id: Annotated[str, Field(description="Certificate ID")],
-    access_token: Annotated[str, Field(description="Access token for authentication")],
-    infocert_sat: Annotated[str, Field(description="SAT token from SMSP authorization")],
-    transaction_id: Annotated[str, Field(description="Transaction ID from SMSP challenge")],
-    pin: Annotated[str, Field(description="PIN code")],
-    link_pdf: Annotated[str, Field(description="Link of the document to sign")]
+    certificate_id: Annotated[str, Field(description="ID del certificato digitale ottenuto da get_certificates")],
+    access_token: Annotated[str, Field(description="Token di accesso ottenuto dal tool auth_token")],
+    infocert_sat: Annotated[str, Field(description="Token SAT ottenuto dal tool authorize_smsp")],
+    transaction_id: Annotated[str, Field(description="ID della transazione ottenuto da request_smsp_challenge")],
+    pin: Annotated[str, Field(description="PIN del certificato digitale (password di protezione)")],
+    link_pdf: Annotated[str, Field(description="URL del documento PDF da firmare (deve essere accessibile pubblicamente)")]
 ) -> dict:
     """
-    Signs a document using Infocert Digital signature service.
+    Firma digitalmente un documento PDF utilizzando il servizio Infocert.
+    
+    Questo tool esegue la firma digitale completa di un documento PDF:
+    1. Scarica il documento dal link fornito
+    2. Converte il contenuto in base64
+    3. Applica la firma digitale PAdES (PDF Advanced Electronic Signatures)
+    4. Restituisce il documento firmato
+    
+    La firma utilizza il livello BASELINE-B per garantire la massima compatibilità
+    e conformità agli standard europei per le firme elettroniche avanzate.
     
     Args:
-        access_token (str): Access token for authentication
-        certificate_id (str): Certificate ID
-        infocert_sat (str): SAT token from SMSP authorization
-        transaction_id (str): Transaction ID from SMSP challenge
-        pin (str): PIN code
-        link_pdf (str): Link of the document to sign
+        certificate_id (str): ID del certificato digitale da utilizzare
+        access_token (str): Token di accesso valido ottenuto da auth_token
+        infocert_sat (str): Token di autorizzazione ottenuto da authorize_smsp
+        transaction_id (str): ID della transazione ottenuto da request_smsp_challenge
+        pin (str): PIN di protezione del certificato digitale
+        link_pdf (str): URL pubblico del documento PDF da firmare
         
     Returns:
-        dict: Dictionary containing the signature response or error information
+        dict: Risposta della firma contenente:
+            - signedDocument: Documento firmato in formato base64
+            - signatureId: ID univoco della firma applicata
+            - timestamp: Timestamp della firma
+            - certificateInfo: Informazioni del certificato utilizzato
+            - type: "error" se si verifica un errore
+            - content: Messaggio di errore dettagliato
     """
     try:
 

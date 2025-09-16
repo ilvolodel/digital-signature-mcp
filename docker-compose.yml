@@ -1,0 +1,17 @@
+services:
+  signature-server:
+    container_name: signature-server
+    build: .
+    ports:
+      - "${PORT}:${PORT}"
+    volumes:
+      - .:/app
+    restart: unless-stopped
+    env_file:
+      - .env
+    networks:
+      - signature-network
+
+networks:
+  signature-network:
+    driver: bridge

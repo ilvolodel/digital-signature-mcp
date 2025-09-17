@@ -16,7 +16,9 @@ from app.config.setting import settings
 
 # MCP server configuration with additional options
 mcp = FastMCP(
-    "Signature MCP Server",
+    name="Signature MCP Server",
+    sse_path='/digital-signature/sse',
+    message_path='/digital-signature/messages/',
     initialization_timeout=120,
     max_retries=10,
     retry_delay=5

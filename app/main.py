@@ -8,6 +8,9 @@ import json
 import base64
 import requests
 from requests.exceptions import RequestException
+import boto3
+from botocore.exceptions import ClientError
+from datetime import datetime
 from app.config.setting import settings
 
 
@@ -98,6 +101,71 @@ def transform_certificates(data):
         transformed.append(new_item)
     
     return transformed
+
+def upload_to_digitalocean_spaces(file_content: bytes, filename: str) -> dict:
+    """
+    Carica un file su DigitalOcean Spaces e genera un URL firmato con durata di 60 minuti.
+    
+    Args:
+        file_content (bytes): Contenuto del file da caricare
+        filename (str): Nome del file
+        
+    Returns:
+        dict: Risultato del caricamento con URL firmato del file o errore
+    """
+    try:
+        # Configura il client S3 per DigitalOcean Spaces
+        session = boto3.session.Session()
+        client = session.client(
+            's3',
+            region_name=settings.DO_SPACES_REGION,
+            endpoint_url=settings.DO_SPACES_ENDPOINT,
+            aws_access_key_id=settings.DO_SPACES_ACCESS_KEY,
+            aws_secret_access_key=settings.DO_SPACES_SECRET_KEY
+        )
+        
+        # Genera un nome file univoco con timestamp
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        unique_filename = f"signed_documents/{timestamp}_{filename}"
+        
+        # Carica il file
+        client.put_object(
+            Bucket=settings.DO_SPACES_BUCKET,
+            Key=unique_filename,
+            Body=file_content,
+            ContentType='application/pdf',
+            ACL='private'  # File privato per sicurezza
+        )
+        
+        # Genera URL firmato con durata di 60 minuti (3600 secondi)
+        signed_url = client.generate_presigned_url(
+            'get_object',
+            Params={
+                'Bucket': settings.DO_SPACES_BUCKET,
+                'Key': unique_filename
+            },
+            ExpiresIn=3600  # 60 minuti
+        )
+        
+        # Genera anche l'URL pubblico (per riferimento)
+        public_url = f"{settings.DO_SPACES_ENDPOINT}/{settings.DO_SPACES_BUCKET}/{unique_filename}"
+        
+        return {
+            "success": True,
+            "signed_url": signed_url,  
+            "expires_in": 3600,
+        }
+        
+    except ClientError as e:
+        return {
+            "success": False,
+            "error": f"DigitalOcean Spaces error: {str(e)}"
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": f"Upload error: {str(e)}"
+        }
 
 @mcp.tool(
     name="get_certificates",
@@ -273,8 +341,8 @@ def authorize_smsp(
 
 @mcp.tool(
     name="sign_document",
-    description="Firma digitalmente un documento PDF utilizzando il servizio Infocert. Questo tool scarica il documento dal link fornito, lo firma con il certificato specificato e restituisce il documento firmato in formato base64.",
-    tags=["signature", "services"]
+    description="Firma digitalmente un documento PDF utilizzando il servizio Infocert. Questo tool scarica il documento dal link fornito, lo firma con il certificato specificato, converte il risultato in PDF e lo carica automaticamente su DigitalOcean Spaces.",
+    tags=["signature", "services", "storage"]
 )
 def sign_document(
     certificate_id: Annotated[str, Field(description="ID del certificato digitale ottenuto da get_certificates")],
@@ -291,7 +359,8 @@ def sign_document(
     1. Scarica il documento dal link fornito
     2. Converte il contenuto in base64
     3. Applica la firma digitale PAdES (PDF Advanced Electronic Signatures)
-    4. Restituisce il documento firmato
+    4. Converte il risultato base64 in file PDF
+    5. Carica automaticamente il PDF firmato su DigitalOcean Spaces
     
     La firma utilizza il livello BASELINE-B per garantire la massima compatibilità
     e conformità agli standard europei per le firme elettroniche avanzate.
@@ -306,10 +375,17 @@ def sign_document(
         
     Returns:
         dict: Risposta della firma contenente:
-            - signedDocument: Documento firmato in formato base64
-            - signatureId: ID univoco della firma applicata
-            - timestamp: Timestamp della firma
-            - certificateInfo: Informazioni del certificato utilizzato
+            - applicationId: ID dell'applicazione
+            - signatureResult: Array con i risultati della firma
+                - requestId: ID della richiesta
+                - isOk: Stato della firma
+                - signedDocument: Documento firmato con content (base64), contentType e attachName
+            - signed_document_url: URL firmato del PDF con durata di 60 minuti (condivisibile) (aggiunto automaticamente)
+            - public_document_url: URL pubblico del PDF (richiede autenticazione) (aggiunto automaticamente)
+            - uploaded_filename: Nome del file caricato (aggiunto automaticamente)
+            - url_expires_in_minutes: Durata dell'URL firmato in minuti (60) (aggiunto automaticamente)
+            - upload_info: Informazioni dettagliate del caricamento (aggiunto automaticamente)
+            - upload_error: Eventuale errore durante il caricamento (aggiunto automaticamente)
             - type: "error" se si verifica un errore
             - content: Messaggio di errore dettagliato
     """
@@ -357,8 +433,26 @@ def sign_document(
 
         response.raise_for_status()
         result = response.json()
-        print(result)
-        return result
+        upload_info={}
+
+        # Estrai il documento firmato in base64 dalla risposta
+        if "signatureResult" in result and len(result["signatureResult"]) > 0:
+            signature_result = result["signatureResult"][0]
+            if "signedDocument" in signature_result and "content" in signature_result["signedDocument"]:
+                signed_document_base64 = signature_result["signedDocument"]["content"]
+                signed_document_name = signature_result["signedDocument"].get("attachName", attach_name)
+                
+                # Converti da base64 a bytes
+                signed_document_bytes = base64.b64decode(signed_document_base64)
+                
+                # Carica il PDF firmato su DigitalOcean Spaces
+                upload_result = upload_to_digitalocean_spaces(signed_document_bytes, signed_document_name)
+                
+                # Aggiungi le informazioni di caricamento al risultato
+                upload_info = upload_result
+                
+        
+        return upload_info
 
     except RequestException as e:
         return {

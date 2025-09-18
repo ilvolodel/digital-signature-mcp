@@ -397,8 +397,9 @@ def sign_document(
         pdf_response = requests.get(link_pdf)
         pdf_response.raise_for_status()
         
-        # Estrai il nome del file dal link
-        attach_name = link_pdf.split('/')[-1]
+        # Rimuovi i parametri di query dall'URL e estrai il nome del file
+        clean_url = link_pdf.split('?')[0]  # Rimuove tutto dopo il '?'
+        attach_name = clean_url.split('/')[-1]
         if not attach_name:
             attach_name = "documento.pdf"
             

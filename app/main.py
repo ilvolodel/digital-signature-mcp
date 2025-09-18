@@ -11,6 +11,7 @@ from requests.exceptions import RequestException
 import boto3
 from botocore.exceptions import ClientError
 from datetime import datetime
+import urllib.parse
 from app.config.setting import settings
 
 
@@ -400,6 +401,10 @@ def sign_document(
         # Rimuovi i parametri di query dall'URL e estrai il nome del file
         clean_url = link_pdf.split('?')[0]  # Rimuove tutto dopo il '?'
         attach_name = clean_url.split('/')[-1]
+        
+        # Decodifica i caratteri URL-encoded nel nome del file
+        attach_name = urllib.parse.unquote(attach_name)
+        
         if not attach_name:
             attach_name = "documento.pdf"
             

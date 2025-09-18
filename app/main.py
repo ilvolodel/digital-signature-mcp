@@ -11,7 +11,7 @@ from requests.exceptions import RequestException
 import boto3
 from botocore.exceptions import ClientError
 from datetime import datetime
-import urllib.parse
+from urllib.parse import urlparse, urlunparse, unquote
 from app.config.setting import settings
 
 
@@ -399,11 +399,13 @@ def sign_document(
         pdf_response.raise_for_status()
         
         # Rimuovi i parametri di query dall'URL e estrai il nome del file
-        clean_url = link_pdf.split('?')[0]  # Rimuove tutto dopo il '?'
+        parsed = urlparse(link_pdf)
+        url_no_query = urlunparse(parsed._replace(query=""))
+        clean_url = url_no_query.split('?')[0]  # Rimuove tutto dopo il '?'
         attach_name = clean_url.split('/')[-1]
-        
+
         # Decodifica i caratteri URL-encoded nel nome del file
-        attach_name = urllib.parse.unquote(attach_name)
+        attach_name = unquote(attach_name)
         
         if not attach_name:
             attach_name = "documento.pdf"
@@ -454,7 +456,7 @@ def sign_document(
                 signed_document_bytes = base64.b64decode(signed_document_base64)
                 
                 # Carica il PDF firmato su DigitalOcean Spaces
-                upload_result = upload_to_digitalocean_spaces(signed_document_bytes, signed_document_name)
+                upload_result = upload_to_digitalocean_spaces(signed_document_bytes, attach_name)
                 
                 # Aggiungi le informazioni di caricamento al risultato
                 upload_info = upload_result

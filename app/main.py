@@ -11,6 +11,9 @@ from datetime import datetime
 from urllib.parse import urlparse, urlunparse, unquote
 from app.config.setting import settings
 from pyhanko.pdf_utils.reader import PdfFileReader
+import logging
+
+logger = logging.getLogger(__name__)\
 
 # MCP server configuration with additional options
 mcp = FastMCP(
@@ -151,46 +154,86 @@ def upload_to_digitalocean_spaces(file_content: bytes, filename: str) -> dict:
             "error": f"Upload error: {str(e)}"
         }
 
-def transform_certificates(certificates_data: dict) -> dict:
+def transform_certificates(certificates_data: list) -> dict:
     """
     Trasforma i dati dei certificati ricevuti dall'API Infocert.
     
     Args:
-        certificates_data (dict): Dati grezzi dei certificati dall'API
+        certificates_data (list): Array di certificati dall'API
         
     Returns:
-        dict: Lista trasformata di certificati con ID estratti dal DNQ
+        dict: Lista trasformata di certificati con ID estratti dal DNQ e campi del subject
     """
     try:
-        if "certificates" not in certificates_data:
+        # Se non è una lista, restituisci i dati originali
+        if not isinstance(certificates_data, list):
             return certificates_data
             
-        certificates = certificates_data["certificates"]
         transformed_certificates = []
         
-        for cert in certificates:
+        for cert in certificates_data:
             # Estrai l'ID dal campo subject DNQ se presente
             certificate_id = None
-            if "subject" in cert and "DNQ" in cert["subject"]:
-                # Cerca l'ID nel DNQ (formato: CN=ID123456789, ...)
-                dnq = cert["subject"]["DNQ"]
+            if "subject" in cert:
+                subject_str = cert["subject"]
                 import re
-                id_match = re.search(r'CN=([^,]+)', dnq)
-                if id_match:
-                    certificate_id = id_match.group(1)
+                
+                # Cerca l'ID nel DNQ (formato: DNQ=2024501530362, ...)
+                dnq_match = re.search(r'DNQ=([^,]+)', subject_str)
+                if dnq_match:
+                    certificate_id = dnq_match.group(1)
             
-            # Se non trovato nel DNQ, usa l'ID diretto se presente
-            if not certificate_id and "id" in cert:
-                certificate_id = cert["id"]
+            # Se non trovato nel DNQ, prova a estrarre dal CN
+            if not certificate_id and "subject" in cert:
+                subject_str = cert["subject"]
+                import re
+                cn_match = re.search(r'CN=([^,]+)', subject_str)
+                if cn_match:
+                    certificate_id = cn_match.group(1)
+            
+            # Estrai i campi dal subject del certificato (stringa)
+            subject_info = {}
+            if "subject" in cert:
+                subject_str = cert["subject"]
+                import re
+                
+                # Estrai GIVENNAME
+                givenname_match = re.search(r'GIVENNAME=([^,]+)', subject_str)
+                if givenname_match:
+                    subject_info["given_name"] = givenname_match.group(1)
+                
+                # Estrai SURNAME
+                surname_match = re.search(r'SURNAME=([^,]+)', subject_str)
+                if surname_match:
+                    subject_info["surname"] = surname_match.group(1)
+                
+                # Estrai CN (Common Name)
+                cn_match = re.search(r'CN=([^,]+)', subject_str)
+                if cn_match:
+                    subject_info["common_name"] = cn_match.group(1)
+                
+                # Estrai DNQ
+                dnq_match = re.search(r'DNQ=([^,]+)', subject_str)
+                if dnq_match:
+                    subject_info["dnq"] = dnq_match.group(1)
+                
+                # Estrai SERIALNUMBER
+                serial_match = re.search(r'SERIALNUMBER=([^,]+)', subject_str)
+                if serial_match:
+                    subject_info["serial_number"] = serial_match.group(1)
+                
+                # Estrai C (Country)
+                country_match = re.search(r'C=([^,]+)', subject_str)
+                if country_match:
+                    subject_info["country"] = country_match.group(1)
             
             transformed_cert = {
                 "certificateId": certificate_id or "Non disponibile",
-                "subject": cert.get("subject", {}),
-                "issuer": cert.get("issuer", {}),
-                "validFrom": cert.get("validFrom", "Non disponibile"),
-                "validTo": cert.get("validTo", "Non disponibile"),
-                "serialNumber": cert.get("serialNumber", "Non disponibile"),
-                "raw_data": cert  # Mantieni i dati originali per riferimento
+                "subject": cert.get("subject", ""),
+                "subject_info": subject_info,  # Campi estratti dal subject
+                "issuer": cert.get("issuer", ""),
+                "status": cert.get("status", "Non disponibile"),
+                "expirationDate": cert.get("expirationDate", "Non disponibile"),
             }
             
             transformed_certificates.append(transformed_cert)
@@ -201,6 +244,7 @@ def transform_certificates(certificates_data: dict) -> dict:
         }
         
     except Exception as e:
+        logger.error(f"Errore nella trasformazione dei certificati: {str(e)}")
         return {
             "type": "error",
             "content": f"Errore nella trasformazione dei certificati: {str(e)}",
@@ -229,11 +273,18 @@ def get_certificates(
     Returns:
         dict: Lista di certificati con i seguenti campi per ogni certificato:
             - certificateId: ID univoco del certificato (estratto da DNQ)
-            - subject: Soggetto del certificato
+            - subject: Soggetto del certificato (stringa originale)
+            - subject_info: Campi estratti dal subject del certificato:
+                - given_name: Nome dell'utente (GIVENNAME)
+                - surname: Cognome dell'utente (SURNAME)
+                - common_name: Nome comune (CN)
+                - dnq: Identificativo DNQ
+                - serial_number: Numero seriale dal subject (SERIALNUMBER)
+                - country: Paese (C)
             - issuer: Emittente del certificato
-            - validFrom: Data di inizio validità
-            - validTo: Data di scadenza
-            - serialNumber: Numero seriale del certificato
+            - status: Stato del certificato (es. "active")
+            - expirationDate: Data di scadenza del certificato
+            - ids: Array di identificatori del certificato
             - type: "error" se si verifica un errore
             - content: Messaggio di errore dettagliato
     """
@@ -248,7 +299,8 @@ def get_certificates(
         response.raise_for_status()
         result = response.json()
         
-        return transform_certificates(result)
+        list_certificates = transform_certificates(result)
+        return list_certificates["certificates"][0]
 
     except RequestException as e:
         return {

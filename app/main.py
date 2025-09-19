@@ -11,9 +11,6 @@ from datetime import datetime
 from urllib.parse import urlparse, urlunparse, unquote
 from app.config.setting import settings
 from pyhanko.pdf_utils.reader import PdfFileReader
-import logging
-
-logger = logging.getLogger(__name__)\
 
 # MCP server configuration with additional options
 mcp = FastMCP(

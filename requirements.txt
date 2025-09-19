@@ -3,3 +3,4 @@ requests==2.32.3
 pydantic==2.11.4
 pydantic-settings==2.8.1
 boto3==1.40.32
+pyHanko==0.31.0

@@ -22,6 +22,24 @@ mcp = FastMCP(
     retry_delay=5
 )
 
+def get_access_token(username: str, password: str) -> dict:
+    url = settings.AUTHORIZATION_API + "/token"
+    headers = {
+        "Accept": "application/json",
+        "Content-Type": "application/x-www-form-urlencoded"
+    }
+    data = {
+        "grant_type": "password",
+        "client_id": settings.CLIENT_ID,
+        "client_secret": settings.CLIENT_SECRET,
+        "username": username,
+        "password": password
+    }
+    response = requests.post(url, headers=headers, data=data)
+    response.raise_for_status()
+    return response.json()
+
+
 @mcp.tool(
     name="auth_token",
     description="Autentica l'utente con i servizi Infocert e ottiene un token di accesso valido per utilizzare le API di firma digitale. Questo tool è il primo passo obbligatorio per accedere a tutti gli altri servizi di firma.",
@@ -52,23 +70,8 @@ def auth_token(
             - content: Messaggio di errore dettagliato
     """
     try:
-        url = settings.AUTHORIZATION_API + "/token"
-        headers = {
-            "Accept": "application/json",
-            "Content-Type": "application/x-www-form-urlencoded"
-        }
-        data = {
-            "grant_type": "password",
-            "client_id": settings.CLIENT_ID,
-            "client_secret": settings.CLIENT_SECRET,
-            "username": username,
-            "password": password
-        }
-        
-        response = requests.post(url, headers=headers, data=data)
-        response.raise_for_status()
-        result = response.json()
-        
+        result = get_access_token(username, password)
+    
         return {
             "access_token": result["accessToken"],
             "refresh_token": result["refreshToken"],
@@ -249,11 +252,12 @@ def transform_certificates(certificates_data: list) -> dict:
 
 @mcp.tool(
     name="get_certificates",
-    description="Recupera la lista di tutti i certificati digitali disponibili per l'utente autenticato. Ogni certificato contiene informazioni dettagliate incluso l'ID univoco necessario per le operazioni di firma.",
+    description="Recupera il primo certificato digitale disponibile per l'utente autenticato. Il certificato contiene informazioni dettagliate incluso l'ID univoco necessario per le operazioni di firma.",
     tags=["certificates", "services"]
 )
 def get_certificates(
-    access_token: Annotated[str, Field(description="Token di accesso ottenuto dal tool auth_token")]
+    username: Annotated[str, Field(description="Username per l'accesso ai servizi Infocert (email o nome utente)")],
+    password: Annotated[str, Field(description="Password per l'accesso ai servizi Infocert")]
 ) -> dict:
     """
     Recupera la lista completa dei certificati digitali disponibili per l'utente.
@@ -264,7 +268,8 @@ def get_certificates(
     estrarre l'ID dal campo subject DNQ.
     
     Args:
-        access_token (str): Token di accesso valido ottenuto da auth_token
+        username (str): Username per l'accesso ai servizi Infocert
+        password (str): Password per l'accesso ai servizi Infocert
         
     Returns:
         dict: Lista di certificati con i seguenti campi per ogni certificato:
@@ -285,9 +290,11 @@ def get_certificates(
             - content: Messaggio di errore dettagliato
     """
     try:
+        obj_token = get_access_token(username, password)
+
         url = f"{settings.SIGNATURE_API}/certificates"
         headers = {
-            "Authorization": f"Bearer {access_token}",
+            "Authorization": f"Bearer {obj_token['accessToken']}",
             "tenant": settings.TENANT
         }
         
@@ -316,7 +323,8 @@ def get_certificates(
     tags=["auth", "services", "smsp"]
 )
 def request_smsp_challenge(
-    access_token: Annotated[str, Field(description="Token di accesso ottenuto dal tool auth_token")]
+    username: Annotated[str, Field(description="Username per l'accesso ai servizi Infocert (email o nome utente)")],
+    password: Annotated[str, Field(description="Password per l'accesso ai servizi Infocert")]
 ) -> dict:
     """
     Invia una richiesta di autenticazione SMS per la firma digitale.
@@ -327,7 +335,8 @@ def request_smsp_challenge(
     dovrà essere utilizzato nel tool authorize_smsp per completare l'autenticazione.
     
     Args:
-        access_token (str): Token di accesso valido ottenuto da auth_token
+        username (str): Username per l'accesso ai servizi Infocert
+        password (str): Password per l'accesso ai servizi Infocert
         
     Returns:
         dict: Risposta della richiesta contenente:
@@ -338,10 +347,11 @@ def request_smsp_challenge(
             - content: Messaggio di errore dettagliato
     """
     try:
+        obj_token = get_access_token(username, password)
         url = f"{settings.SIGNATURE_API}/authenticators/SMSP/challenge"
         headers = {
             "tenant": settings.TENANT,
-            "Authorization": f"Bearer {access_token}",
+            "Authorization": f"Bearer {obj_token['accessToken']}",
             "Content-Type": "application/json"
         }
         
@@ -368,7 +378,8 @@ def request_smsp_challenge(
     tags=["auth", "services", "smsp"]
 )
 def authorize_smsp(
-    access_token: Annotated[str, Field(description="Token di accesso ottenuto dal tool auth_token")],
+    username: Annotated[str, Field(description="Username per l'accesso ai servizi Infocert (email o nome utente)")],
+    password: Annotated[str, Field(description="Password per l'accesso ai servizi Infocert")],
     certificate_id: Annotated[str, Field(description="ID del certificato digitale ottenuto da get_certificates")],
     transactionId: Annotated[str, Field(description="ID della transazione ottenuto da request_smsp_challenge")],
     otp: Annotated[str, Field(description="Codice OTP ricevuto via SMS dal tool request_smsp_challenge")],
@@ -383,7 +394,8 @@ def authorize_smsp(
     deve essere utilizzato nel tool sign_document per firmare il documento.
     
     Args:
-        access_token (str): Token di accesso valido ottenuto da auth_token
+        username (str): Username per l'accesso ai servizi Infocert
+        password (str): Password per l'accesso ai servizi Infocert
         certificate_id (str): ID del certificato digitale da utilizzare
         transactionId (str): ID della transazione ottenuto da request_smsp_challenge
         otp (str): Codice OTP ricevuto via SMS
@@ -396,10 +408,12 @@ def authorize_smsp(
             - content: Messaggio di errore dettagliato
     """
     try:
+        obj_token = get_access_token(username, password)
+
         url = f"{settings.SIGNATURE_API}/authenticators/{certificate_id}/SMSP/authorize"
         headers = {
             "tenant": settings.TENANT,
-            "Authorization": f"Bearer {access_token}",
+            "Authorization": f"Bearer {obj_token['accessToken']}",
             "Content-Type": "application/json"
         }
         
@@ -429,12 +443,13 @@ def authorize_smsp(
 
 @mcp.tool(
     name="sign_document",
-    description="Firma digitalmente un documento PDF utilizzando il servizio Infocert. Questo tool scarica il documento dal link fornito, lo firma con il certificato specificato, converte il risultato in PDF e lo carica automaticamente su DigitalOcean Spaces.",
+    description="Firma digitalmente un documento PDF utilizzando il servizio Infocert. Questo tool scarica il documento dal link fornito, lo firma con il certificato specificato, converte il risultato in PDF e restituisce le informazioni di caricamento su DigitalOcean Spaces.",
     tags=["signature", "services", "storage"]
 )
 def sign_document(
     certificate_id: Annotated[str, Field(description="ID del certificato digitale ottenuto da get_certificates")],
-    access_token: Annotated[str, Field(description="Token di accesso ottenuto dal tool auth_token")],
+    username: Annotated[str, Field(description="Username per l'accesso ai servizi Infocert (email o nome utente)")],
+    password: Annotated[str, Field(description="Password per l'accesso ai servizi Infocert")],
     infocert_sat: Annotated[str, Field(description="Token SAT ottenuto dal tool authorize_smsp")],
     transaction_id: Annotated[str, Field(description="ID della transazione ottenuto da request_smsp_challenge")],
     pin: Annotated[str, Field(description="PIN del certificato digitale (password di protezione)")],
@@ -456,7 +471,8 @@ def sign_document(
     
     Args:
         certificate_id (str): ID del certificato digitale da utilizzare
-        access_token (str): Token di accesso valido ottenuto da auth_token
+        username (str): Username per l'accesso ai servizi Infocert
+        password (str): Password per l'accesso ai servizi Infocert
         infocert_sat (str): Token di autorizzazione ottenuto da authorize_smsp
         transaction_id (str): ID della transazione ottenuto da request_smsp_challenge
         pin (str): PIN di protezione del certificato digitale
@@ -483,9 +499,9 @@ def sign_document(
             - content: Messaggio di errore dettagliato
     """
     try:
-
+        obj_token = get_access_token(username, password)
         ####### LIST 
-        certificate = get_certificates(access_token)
+        certificate = get_certificates(username, password)
         name_certificate = certificate["subject_info"]["common_name"]
         data_time = datetime.now().strftime("%d/%m/%Y %H:%M")
         visible_text = f".\nFirmato da {name_certificate} \nin data {data_time}"
@@ -531,7 +547,7 @@ def sign_document(
         url = f"{settings.SIGNATURE_API}/certificates/{certificate_id}/sign"
         headers = {
             "tenant": settings.TENANT,
-            "Authorization": f"Bearer {access_token}",
+            "Authorization": f"Bearer {obj_token['accessToken']}",
             "Content-Type": "application/json",
             "Infocert-SAT": infocert_sat,
             "Transaction-Id": transaction_id

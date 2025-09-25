@@ -411,7 +411,7 @@ def authorize_smsp(
         }
         
         payload = {
-            "signaturesNumber": 1,
+            "signaturesNumber": 10,
             "transactionId": transactionId,
             "otp": otp,
             "pin": pin
@@ -537,7 +537,7 @@ def sign_document(
         url = f"{settings.SIGNATURE_API}/certificates/{certificate_id}/sign"
         headers = {
             "tenant": settings.TENANT,
-            "Authorization": f"Bearer {obj_token['accessToken']}",
+            "Authorization": f"Bearer {access_token}",
             "Content-Type": "application/json",
             "Infocert-SAT": infocert_sat,
             "Transaction-Id": transaction_id

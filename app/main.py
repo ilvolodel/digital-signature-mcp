@@ -40,55 +40,6 @@ def get_access_token(username: str, password: str) -> dict:
     return response.json()
 
 
-@mcp.tool(
-    name="auth_token",
-    description="Autentica l'utente con i servizi Infocert e ottiene un token di accesso valido per utilizzare le API di firma digitale. Questo tool è il primo passo obbligatorio per accedere a tutti gli altri servizi di firma.",
-    tags=["auth", "services"]
-)
-def auth_token(
-    username: Annotated[str, Field(description="Username per l'accesso ai servizi Infocert (email o nome utente)")],
-    password: Annotated[str, Field(description="Password per l'accesso ai servizi Infocert")]
-) -> dict:
-    """
-    Autentica l'utente con i servizi Infocert e restituisce un token di accesso.
-    
-    Questo tool effettua una richiesta OAuth2 con grant_type=password per ottenere
-    un token di accesso che permetterà di utilizzare tutti gli altri servizi di firma digitale.
-    Il token ha una durata limitata e può essere rinnovato usando il refresh_token.
-    
-    Args:
-        username (str): Username per l'accesso ai servizi Infocert
-        password (str): Password per l'accesso ai servizi Infocert
-        
-    Returns:
-        dict: Dizionario contenente:
-            - access_token: Token di accesso per le API
-            - refresh_token: Token per rinnovare l'accesso
-            - expires_in: Durata del token in secondi
-            - scope: Permessi associati al token
-            - type: "error" se si verifica un errore
-            - content: Messaggio di errore dettagliato
-    """
-    try:
-        result = get_access_token(username, password)
-    
-        return {
-            "access_token": result["accessToken"],
-            "refresh_token": result["refreshToken"],
-            "expires_in": result["expiresIn"],
-            "scope": result["scope"]
-        }
-    except RequestException as e:
-        return {
-            "type": "error",
-            "content": f"Error during Services token request: {str(e)}"
-        }
-    except ValueError as e:
-        return {
-            "type": "error",
-            "content": f"Error parsing Services response: {str(e)}"
-        }
-
 def upload_to_digitalocean_spaces(file_content: bytes, filename: str) -> dict:
     """
     Carica un file su DigitalOcean Spaces e genera un URL firmato con durata di 60 minuti.
@@ -250,14 +201,63 @@ def transform_certificates(certificates_data: list) -> dict:
             "original_data": certificates_data
         }
 
+
+@mcp.tool(
+    name="auth_token",
+    description="Autentica l'utente con i servizi Infocert e ottiene un token di accesso valido per utilizzare le API di firma digitale. Questo tool è il primo passo obbligatorio per accedere a tutti gli altri servizi di firma.",
+    tags=["auth", "services"]
+)
+def auth_token(
+    username: Annotated[str, Field(description="Username per l'accesso ai servizi Infocert (email o nome utente)")],
+    password: Annotated[str, Field(description="Password per l'accesso ai servizi Infocert")]
+) -> dict:
+    """
+    Autentica l'utente con i servizi Infocert e restituisce un token di accesso.
+    
+    Questo tool effettua una richiesta OAuth2 con grant_type=password per ottenere
+    un token di accesso che permetterà di utilizzare tutti gli altri servizi di firma digitale.
+    Il token ha una durata limitata e può essere rinnovato usando il refresh_token.
+    
+    Args:
+        username (str): Username per l'accesso ai servizi Infocert
+        password (str): Password per l'accesso ai servizi Infocert
+        
+    Returns:
+        dict: Dizionario contenente:
+            - access_token: Token di accesso per le API
+            - refresh_token: Token per rinnovare l'accesso
+            - expires_in: Durata del token in secondi
+            - scope: Permessi associati al token
+            - type: "error" se si verifica un errore
+            - content: Messaggio di errore dettagliato
+    """
+    try:
+        result = get_access_token(username, password)
+    
+        return {
+            "access_token": result["accessToken"],
+            "refresh_token": result["refreshToken"],
+            "expires_in": result["expiresIn"],
+            "scope": result["scope"]
+        }
+    except RequestException as e:
+        return {
+            "type": "error",
+            "content": f"Error during Services token request: {str(e)}"
+        }
+    except ValueError as e:
+        return {
+            "type": "error",
+            "content": f"Error parsing Services response: {str(e)}"
+        }
+
 @mcp.tool(
     name="get_certificates",
     description="Recupera il primo certificato digitale disponibile per l'utente autenticato. Il certificato contiene informazioni dettagliate incluso l'ID univoco necessario per le operazioni di firma.",
     tags=["certificates", "services"]
 )
 def get_certificates(
-    username: Annotated[str, Field(description="Username per l'accesso ai servizi Infocert (email o nome utente)")],
-    password: Annotated[str, Field(description="Password per l'accesso ai servizi Infocert")]
+    access_token: Annotated[str, Field(description="Token di accesso ottenuto dal tool auth_token")]
 ) -> dict:
     """
     Recupera la lista completa dei certificati digitali disponibili per l'utente.
@@ -268,8 +268,7 @@ def get_certificates(
     estrarre l'ID dal campo subject DNQ.
     
     Args:
-        username (str): Username per l'accesso ai servizi Infocert
-        password (str): Password per l'accesso ai servizi Infocert
+        access_token (str): Token di accesso valido ottenuto da auth_token
         
     Returns:
         dict: Lista di certificati con i seguenti campi per ogni certificato:
@@ -290,11 +289,10 @@ def get_certificates(
             - content: Messaggio di errore dettagliato
     """
     try:
-        obj_token = get_access_token(username, password)
 
         url = f"{settings.SIGNATURE_API}/certificates"
         headers = {
-            "Authorization": f"Bearer {obj_token['accessToken']}",
+            "Authorization": f"Bearer {access_token}",
             "tenant": settings.TENANT
         }
         
@@ -323,8 +321,7 @@ def get_certificates(
     tags=["auth", "services", "smsp"]
 )
 def request_smsp_challenge(
-    username: Annotated[str, Field(description="Username per l'accesso ai servizi Infocert (email o nome utente)")],
-    password: Annotated[str, Field(description="Password per l'accesso ai servizi Infocert")]
+    access_token: Annotated[str, Field(description="Token di accesso ottenuto dal tool auth_token")]
 ) -> dict:
     """
     Invia una richiesta di autenticazione SMS per la firma digitale.
@@ -335,8 +332,7 @@ def request_smsp_challenge(
     dovrà essere utilizzato nel tool authorize_smsp per completare l'autenticazione.
     
     Args:
-        username (str): Username per l'accesso ai servizi Infocert
-        password (str): Password per l'accesso ai servizi Infocert
+        access_token (str): Token di accesso valido ottenuto da auth_token
         
     Returns:
         dict: Risposta della richiesta contenente:
@@ -347,11 +343,11 @@ def request_smsp_challenge(
             - content: Messaggio di errore dettagliato
     """
     try:
-        obj_token = get_access_token(username, password)
+        
         url = f"{settings.SIGNATURE_API}/authenticators/SMSP/challenge"
         headers = {
             "tenant": settings.TENANT,
-            "Authorization": f"Bearer {obj_token['accessToken']}",
+            "Authorization": f"Bearer {access_token}",
             "Content-Type": "application/json"
         }
         
@@ -378,8 +374,7 @@ def request_smsp_challenge(
     tags=["auth", "services", "smsp"]
 )
 def authorize_smsp(
-    username: Annotated[str, Field(description="Username per l'accesso ai servizi Infocert (email o nome utente)")],
-    password: Annotated[str, Field(description="Password per l'accesso ai servizi Infocert")],
+    access_token: Annotated[str, Field(description="Token di accesso ottenuto dal tool auth_token")],
     certificate_id: Annotated[str, Field(description="ID del certificato digitale ottenuto da get_certificates")],
     transactionId: Annotated[str, Field(description="ID della transazione ottenuto da request_smsp_challenge")],
     otp: Annotated[str, Field(description="Codice OTP ricevuto via SMS dal tool request_smsp_challenge")],
@@ -394,8 +389,7 @@ def authorize_smsp(
     deve essere utilizzato nel tool sign_document per firmare il documento.
     
     Args:
-        username (str): Username per l'accesso ai servizi Infocert
-        password (str): Password per l'accesso ai servizi Infocert
+        access_token (str): Token di accesso valido ottenuto da auth_token
         certificate_id (str): ID del certificato digitale da utilizzare
         transactionId (str): ID della transazione ottenuto da request_smsp_challenge
         otp (str): Codice OTP ricevuto via SMS
@@ -408,12 +402,11 @@ def authorize_smsp(
             - content: Messaggio di errore dettagliato
     """
     try:
-        obj_token = get_access_token(username, password)
 
         url = f"{settings.SIGNATURE_API}/authenticators/{certificate_id}/SMSP/authorize"
         headers = {
             "tenant": settings.TENANT,
-            "Authorization": f"Bearer {obj_token['accessToken']}",
+            "Authorization": f"Bearer {access_token}",
             "Content-Type": "application/json"
         }
         
@@ -443,13 +436,12 @@ def authorize_smsp(
 
 @mcp.tool(
     name="sign_document",
-    description="Firma digitalmente un documento PDF utilizzando il servizio Infocert. Questo tool scarica il documento dal link fornito, lo firma con il certificato specificato, converte il risultato in PDF e restituisce le informazioni di caricamento su DigitalOcean Spaces.",
+    description="Firma digitalmente un documento PDF utilizzando il servizio Infocert. Questo tool scarica il documento dal link fornito, lo firma con il certificato specificato, converte il risultato in PDF e lo carica automaticamente su DigitalOcean Spaces.",
     tags=["signature", "services", "storage"]
 )
 def sign_document(
     certificate_id: Annotated[str, Field(description="ID del certificato digitale ottenuto da get_certificates")],
-    username: Annotated[str, Field(description="Username per l'accesso ai servizi Infocert (email o nome utente)")],
-    password: Annotated[str, Field(description="Password per l'accesso ai servizi Infocert")],
+    access_token: Annotated[str, Field(description="Token di accesso ottenuto dal tool auth_token")],
     infocert_sat: Annotated[str, Field(description="Token SAT ottenuto dal tool authorize_smsp")],
     transaction_id: Annotated[str, Field(description="ID della transazione ottenuto da request_smsp_challenge")],
     pin: Annotated[str, Field(description="PIN del certificato digitale (password di protezione)")],
@@ -471,8 +463,7 @@ def sign_document(
     
     Args:
         certificate_id (str): ID del certificato digitale da utilizzare
-        username (str): Username per l'accesso ai servizi Infocert
-        password (str): Password per l'accesso ai servizi Infocert
+        access_token (str): Token di accesso valido ottenuto da auth_token
         infocert_sat (str): Token di autorizzazione ottenuto da authorize_smsp
         transaction_id (str): ID della transazione ottenuto da request_smsp_challenge
         pin (str): PIN di protezione del certificato digitale
@@ -499,9 +490,8 @@ def sign_document(
             - content: Messaggio di errore dettagliato
     """
     try:
-        obj_token = get_access_token(username, password)
         ####### LIST 
-        certificate = get_certificates(username, password)
+        certificate = get_certificates(access_token)
         name_certificate = certificate["subject_info"]["common_name"]
         data_time = datetime.now().strftime("%d/%m/%Y %H:%M")
         visible_text = f".\nFirmato da {name_certificate} \nin data {data_time}"
@@ -623,142 +613,3 @@ def sign_document(
             "type": "error",
             "content": f"Error parsing signature response: {str(e)}"
         }
-
-#@mcp.tool(
-#    name="verify_signature",
-#    description="Verifica e valida tutte le firme digitali presenti in un documento PDF. Restituisce informazioni dettagliate su ogni firma inclusi validità, certificato, data di firma e stato di verifica.",
-#    tags=["signature", "verification", "validation"]
-#)
-def verify_signature(
-    link_pdf: Annotated[str, Field(description="URL del documento PDF firmato (deve essere accessibile pubblicamente)")]
-) -> dict:
-    """
-    Verifica tutte le firme digitali presenti in un documento PDF.
-    """
-    try:
-        # Scarica il PDF dal link fornito
-        pdf_response = requests.get(link_pdf)
-        pdf_response.raise_for_status()
-        
-        # Crea un file temporaneo in memoria
-        from io import BytesIO
-        pdf_stream = BytesIO(pdf_response.content)
-
-        # Leggi il PDF
-        pdf_reader = PdfFileReader(pdf_stream)
-        
-        # Verifica se il PDF ha firme
-        if not pdf_reader.embedded_signatures:
-            return {
-                "total_signatures": 0,
-                "signatures": [],
-                "document_integrity": True,
-                "verification_summary": "Nessuna firma digitale trovata nel documento",
-                "message": "Il documento non contiene firme digitali"
-            }
-        
-        signatures_info = []
-        
-        # Analizza ogni firma presente per estrarre solo le informazioni dei firmatari
-        for i, sig in enumerate(pdf_reader.embedded_signatures, 1):
-            try:
-                # Accedi direttamente al certificato dalla firma senza validazione
-                cert = sig.signer_cert
-                
-                # Estrai informazioni del firmatario
-                signer_name = ""
-                signer_email = ""
-                
-                # Prova a estrarre il nome dal subject del certificato
-                if hasattr(cert, 'subject') and cert.subject:
-                    # Usa l'attributo human_friendly se disponibile
-                    if hasattr(cert.subject, 'human_friendly'):
-                        signer_name = cert.subject.human_friendly
-                    else:
-                        # Fallback: estrai manualmente dal subject
-                        for attr in cert.subject:
-                            if hasattr(attr, 'oid') and attr.oid._name == 'commonName':
-                                signer_name = str(attr.value)
-                            elif hasattr(attr, 'oid') and attr.oid._name == 'emailAddress':
-                                signer_email = str(attr.value)
-                
-                # Se non trovato nel subject, prova nei SAN
-                if not signer_name and hasattr(cert, 'extensions'):
-                    for ext in cert.extensions:
-                        if hasattr(ext, 'oid') and ext.oid._name == 'subjectAltName':
-                            for name in ext.value:
-                                if isinstance(name, tuple) and name[0] == 'email':
-                                    signer_email = name[1]
-                                elif isinstance(name, tuple) and name[0] == 'dirName':
-                                    # Prova a estrarre il nome dal DN
-                                    pass
-                
-                # Data di firma - estrai direttamente dalla firma
-                sign_date = None
-                if hasattr(sig, 'signature_object') and sig.signature_object:
-                    try:
-                        sign_date = sig.signature_object.get_signing_time()
-                    except:
-                        pass
-                
-                # Livello della firma
-                signature_level = "Unknown"
-                if hasattr(sig, 'signature_object') and sig.signature_object:
-                    try:
-                        if hasattr(sig.signature_object, 'signature_level'):
-                            signature_level = str(sig.signature_object.signature_level)
-                    except:
-                        pass
-                
-                signature_info = {
-                    "cert": cert,
-                    "signature_number": i,
-                    "signer_name": signer_name or "Non disponibile",
-                    "signer_email": signer_email or "Non disponibile",
-                    "sign_date": sign_date.isoformat() if sign_date else "Non disponibile",
-                    "certificate_subject": str(cert.subject) if hasattr(cert, 'subject') else "Non disponibile",
-                    "certificate_issuer": str(cert.issuer) if hasattr(cert, 'issuer') else "Non disponibile",
-                    "certificate_valid_from": cert.not_valid_before.isoformat() if hasattr(cert, 'not_valid_before') and cert.not_valid_before else "Non disponibile",
-                    "certificate_valid_to": cert.not_valid_after.isoformat() if hasattr(cert, 'not_valid_after') and cert.not_valid_after else "Non disponibile",
-                    "signature_level": signature_level,
-                    "serial_number": cert.serial_number if hasattr(cert, 'serial_number') else "Non disponibile"
-                }
-                
-                signatures_info.append(signature_info)
-                
-            except Exception as e:
-                # Se c'è un errore nell'analisi di una singola firma
-                signature_info = {
-                    "signature_number": i,
-                    "signer_name": f"Errore nell'analisi: {str(e)}",
-                    "signer_email": "Non disponibile",
-                    "sign_date": "Non disponibile",
-                    "certificate_subject": "Non disponibile",
-                    "certificate_issuer": "Non disponibile",
-                    "certificate_valid_from": "Non disponibile",
-                    "certificate_valid_to": "Non disponibile",
-                    "signature_level": "Unknown",
-                    "serial_number": "Non disponibile"
-                }
-                signatures_info.append(signature_info)
-        
-        # Riepilogo delle firme trovate
-        summary = f"Trovate {len(signatures_info)} firme digitali nel documento"
-        
-        return {
-            "total_signatures": len(signatures_info),
-            "signatures": signatures_info,
-            "summary": summary
-        }
-        
-    except RequestException as e:
-        return {
-            "type": "error",
-            "content": f"Errore durante il download del PDF: {str(e)}"
-        }
-    except Exception as e:
-        return {
-            "type": "error",
-            "content": f"Errore durante la verifica delle firme: {str(e)}"
-        }
-   

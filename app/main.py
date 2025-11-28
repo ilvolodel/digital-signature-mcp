@@ -411,7 +411,7 @@ def authorize_smsp(
         }
         
         payload = {
-            "signaturesNumber": 10,
+            "signaturesNumber": 100,
             "transactionId": transactionId,
             "otp": otp,
             "pin": pin
@@ -446,7 +446,7 @@ def sign_document(
     transaction_id: Annotated[str, Field(description="ID della transazione ottenuto da request_smsp_challenge")],
     pin: Annotated[str, Field(description="PIN del certificato digitale (password di protezione)")],
     link_pdf: Annotated[str, Field(description="URL del documento PDF da firmare (deve essere accessibile pubblicamente)")],
-    page_signature: Annotated[str, Field(description="Pagina dove posizionare la firma: 'prima_pagina', 'ultima_pagina', o 'tutte_le_pagine' (default: 'tutte_le_pagine')", default="tutte_le_pagine")] = "tutte_le_pagine",
+    page_signature: Annotated[str, Field(description="Pagina dove posizionare la firma: 'prima_pagina', 'ultima_pagina', o 'tutte_le_pagine' (default: 'ultima_pagina')", default="ultima_pagina")] = "tutte_le_pagine",
 ) -> dict:
     """
     Firma digitalmente un documento PDF utilizzando il servizio Infocert.
@@ -514,11 +514,31 @@ def sign_document(
         # Conta le pagine del PDF
         from io import BytesIO
         pdf_stream = BytesIO(pdf_response.content)
-        pdf_reader = PdfFileReader(pdf_stream)
-        # Accedi al catalogo del documento per ottenere il numero di pagine
-        root = pdf_reader.root
-        pages = root['/Pages']
-        total_pages = pages['/Count']
+        try:
+            # Usa strict=False per gestire PDF con strutture xref non standard
+            pdf_reader = PdfFileReader(pdf_stream, strict=False)
+            # Accedi al catalogo del documento per ottenere il numero di pagine
+            root = pdf_reader.root
+            pages = root['/Pages']
+            total_pages = pages['/Count']
+        except Exception as e:
+            # Se la lettura fallisce, prova con un approccio alternativo
+            # Usa PyPDF2 come fallback se disponibile
+            try:
+                import PyPDF2
+                pdf_stream.seek(0)  # Reset stream position
+                pdf_reader_fallback = PyPDF2.PdfReader(pdf_stream, strict=False)
+                total_pages = len(pdf_reader_fallback.pages)
+            except ImportError:
+                # Se PyPDF2 non è disponibile, usa un valore di default
+                # e lascia che l'API di firma gestisca il documento
+                total_pages = 1
+                # Log dell'errore per debug
+                print(f"Warning: Impossibile contare le pagine del PDF: {str(e)}. Usando default: 1 pagina.")
+            except Exception as e2:
+                # Se anche il fallback fallisce, usa un valore di default
+                total_pages = 1
+                print(f"Warning: Impossibile contare le pagine del PDF: {str(e2)}. Usando default: 1 pagina.")
         
         # Determina le pagine per la firma basato sull'opzione scelta
         if page_signature == "tutte_le_pagine":

@@ -105,6 +105,101 @@ def upload_to_digitalocean_spaces(file_content: bytes, filename: str) -> dict:
             "error": f"Upload error: {str(e)}"
         }
 
+def get_signature_position(
+    position: str = "bottom-right",
+    page_width: int = 595,  # A4 standard width in points
+    page_height: int = 842,  # A4 standard height in points
+    custom_coords: Optional[Dict[str, int]] = None
+) -> Dict[str, int]:
+    """
+    Calcola le coordinate (llx, lly, urx, ury) per il talloncino di firma.
+    
+    Il talloncino ha dimensioni fisse:
+    - Larghezza: 80 punti
+    - Altezza: 30 punti
+    - Margine dai bordi: 15 punti
+    
+    Args:
+        position (str): Posizione predefinita tra:
+            - 'bottom-right': Angolo basso-destra (default)
+            - 'bottom-left': Angolo basso-sinistra
+            - 'bottom-center': Centro in basso
+            - 'top-right': Angolo alto-destra
+            - 'top-left': Angolo alto-sinistra
+            - 'top-center': Centro in alto
+            - 'center': Centro della pagina
+            - 'custom': Usa coordinate custom_coords
+        page_width (int): Larghezza della pagina in punti (default: 595 per A4)
+        page_height (int): Altezza della pagina in punti (default: 842 per A4)
+        custom_coords (dict): Coordinate personalizzate {'llx': int, 'lly': int, 'urx': int, 'ury': int}
+        
+    Returns:
+        dict: Coordinate del talloncino {'llx': int, 'lly': int, 'urx': int, 'ury': int}
+    """
+    # Dimensioni fisse del talloncino
+    SIGNATURE_WIDTH = 80
+    SIGNATURE_HEIGHT = 30
+    MARGIN = 15
+    
+    # Se coordinate custom, restituiscile direttamente
+    if position == "custom" and custom_coords:
+        return {
+            "llx": custom_coords.get("llx", 500),
+            "lly": custom_coords.get("lly", 60),
+            "urx": custom_coords.get("urx", 580),
+            "ury": custom_coords.get("ury", 90)
+        }
+    
+    # Calcola coordinate basate sulla posizione
+    positions = {
+        "bottom-right": {
+            "llx": page_width - SIGNATURE_WIDTH - MARGIN,
+            "lly": MARGIN,
+            "urx": page_width - MARGIN,
+            "ury": MARGIN + SIGNATURE_HEIGHT
+        },
+        "bottom-left": {
+            "llx": MARGIN,
+            "lly": MARGIN,
+            "urx": MARGIN + SIGNATURE_WIDTH,
+            "ury": MARGIN + SIGNATURE_HEIGHT
+        },
+        "bottom-center": {
+            "llx": (page_width - SIGNATURE_WIDTH) // 2,
+            "lly": MARGIN,
+            "urx": (page_width + SIGNATURE_WIDTH) // 2,
+            "ury": MARGIN + SIGNATURE_HEIGHT
+        },
+        "top-right": {
+            "llx": page_width - SIGNATURE_WIDTH - MARGIN,
+            "lly": page_height - SIGNATURE_HEIGHT - MARGIN,
+            "urx": page_width - MARGIN,
+            "ury": page_height - MARGIN
+        },
+        "top-left": {
+            "llx": MARGIN,
+            "lly": page_height - SIGNATURE_HEIGHT - MARGIN,
+            "urx": MARGIN + SIGNATURE_WIDTH,
+            "ury": page_height - MARGIN
+        },
+        "top-center": {
+            "llx": (page_width - SIGNATURE_WIDTH) // 2,
+            "lly": page_height - SIGNATURE_HEIGHT - MARGIN,
+            "urx": (page_width + SIGNATURE_WIDTH) // 2,
+            "ury": page_height - MARGIN
+        },
+        "center": {
+            "llx": (page_width - SIGNATURE_WIDTH) // 2,
+            "lly": (page_height - SIGNATURE_HEIGHT) // 2,
+            "urx": (page_width + SIGNATURE_WIDTH) // 2,
+            "ury": (page_height + SIGNATURE_HEIGHT) // 2
+        }
+    }
+    
+    # Restituisci le coordinate della posizione richiesta
+    return positions.get(position, positions["bottom-right"])
+
+
 def transform_certificates(certificates_data: list) -> dict:
     """
     Trasforma i dati dei certificati ricevuti dall'API Infocert.
@@ -447,6 +542,8 @@ def sign_document(
     pin: Annotated[str, Field(description="PIN del certificato digitale (password di protezione)")],
     link_pdf: Annotated[str, Field(description="URL del documento PDF da firmare (deve essere accessibile pubblicamente)")],
     page_signature: Annotated[str, Field(description="Pagina dove posizionare la firma: 'prima_pagina', 'ultima_pagina', o 'tutte_le_pagine' (default: 'ultima_pagina')", default="ultima_pagina")] = "tutte_le_pagine",
+    signature_position: Annotated[str, Field(description="Posizione del talloncino: 'bottom-right', 'bottom-left', 'bottom-center', 'top-right', 'top-left', 'top-center', 'center', 'custom' (default: 'bottom-right')", default="bottom-right")] = "bottom-right",
+    custom_coords: Annotated[Optional[Dict[str, int]], Field(description="Coordinate personalizzate se signature_position='custom': {'llx': int, 'lly': int, 'urx': int, 'ury': int}")] = None,
 ) -> dict:
     """
     Firma digitalmente un documento PDF utilizzando il servizio Infocert.
@@ -469,6 +566,10 @@ def sign_document(
         pin (str): PIN di protezione del certificato digitale
         link_pdf (str): URL pubblico del documento PDF da firmare
         page_signature (str): Pagina dove posizionare la firma: 'prima_pagina', 'ultima_pagina', o 'tutte_le_pagine' (default: 'tutte_le_pagine')
+        signature_position (str): Posizione del talloncino: 'bottom-right' (default), 'bottom-left', 'bottom-center', 
+                                  'top-right', 'top-left', 'top-center', 'center', 'custom'
+        custom_coords (dict): Coordinate personalizzate quando signature_position='custom': 
+                              {'llx': int, 'lly': int, 'urx': int, 'ury': int}
         
     Returns:
         dict: Risposta della firma contenente:
@@ -563,16 +664,24 @@ def sign_document(
             "Transaction-Id": transaction_id
         }
 
+        # Calcola le coordinate del talloncino di firma
+        coords = get_signature_position(
+            position=signature_position,
+            page_width=595,  # A4 standard
+            page_height=842,  # A4 standard
+            custom_coords=custom_coords
+        )
+        
         # Crea l'array signatureFields dinamico per ogni pagina
         signature_fields = []
         for page_num in signature_pages:
             signature_fields.append({
                 "position": {
                     "page": page_num,
-                    "llx": 500,
-                    "lly": 60,
-                    "urx": 580,
-                    "ury": 90
+                    "llx": coords["llx"],
+                    "lly": coords["lly"],
+                    "urx": coords["urx"],
+                    "ury": coords["ury"]
                 },
                 "signatureImage": "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",
                 "avoidGraphicLayers": True,

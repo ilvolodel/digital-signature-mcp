@@ -20,23 +20,11 @@ Personalizzare il server MCP per firma digitale con:
 
 ## ⚡ Quick Commands
 
-### 1. Migrazione su GitHub (5 minuti)
+### Stato Repository
 
-```bash
-# Entra nella directory
-cd /workspace/digital-signature-mcp
+✅ **Migrazione Completata**: Il repository è disponibile su **https://github.com/ilvolodel/digital-signature-mcp**
 
-# Rimuovi remote originale
-git remote remove origin
-
-# Aggiungi il TUO remote (SOSTITUISCI <USERNAME> e <REPO>)
-git remote add origin https://github.com/<USERNAME>/<REPO>.git
-
-# Push
-git push -u origin main
-```
-
-### 2. Modifica Endpoint (15 minuti)
+### 1. Modifica Endpoint (15 minuti)
 
 **File: `app/config/setting.py`** - Aggiungi alla fine:
 ```python
@@ -65,7 +53,7 @@ MCP_MESSAGE_PATH=/api/signature/messages/
 MCP_SERVER_NAME=Custom Signature Server
 ```
 
-### 3. Posizionamento Firma (30 minuti)
+### 2. Posizionamento Firma (30 minuti)
 
 **Copia la funzione `get_signature_position()` dalla guida completa**  
 Cerca in `MIGRATION_AND_CUSTOMIZATION_GUIDE.md` sezione 5.4
@@ -77,7 +65,7 @@ Cerca in `MIGRATION_AND_CUSTOMIZATION_GUIDE.md` sezione 5.4
 **Modifica loop signature_fields** (riga 566):
 - Usa `get_signature_position()` invece di coordinate hardcoded
 
-### 4. Conversione PDF/A (1-2 ore)
+### 3. Conversione PDF/A (1-2 ore)
 
 **File: `requirements.txt`** - Aggiungi:
 ```txt
@@ -108,7 +96,7 @@ Copia il codice completo dalla guida (sezione 6.3)
 - Aggiungi import: `from app.pdf_converter import pdf_converter`
 - Integra conversione in `sign_document()` (dopo download file)
 
-### 5. Build e Test (10 minuti)
+### 4. Build e Test (10 minuti)
 
 ```bash
 # Rebuild Docker
@@ -129,24 +117,19 @@ curl http://localhost:8888/api/signature/sse
 ## 📋 Checklist Veloce
 
 ```
-Fase 1: Migrazione
-[ ] Remote git modificato
-[ ] Push su GitHub personale
-[ ] Verificato git log
-
-Fase 2: Endpoint
+Fase 1: Endpoint
 [ ] Modificato setting.py
 [ ] Modificato main.py (FastMCP config)
 [ ] Aggiornato .env
 [ ] Testato endpoint SSE
 
-Fase 3: Firma
+Fase 2: Firma
 [ ] Creata funzione get_signature_position()
 [ ] Modificata signature sign_document()
 [ ] Modificato loop signature_fields
 [ ] Testato posizioni predefinite
 
-Fase 4: PDF/A
+Fase 3: PDF/A
 [ ] Aggiornato requirements.txt
 [ ] Aggiornato Dockerfile
 [ ] Creato pdf_converter.py
@@ -154,7 +137,7 @@ Fase 4: PDF/A
 [ ] Rebuild Docker
 [ ] Testato conversione
 
-Fase 5: Deploy
+Fase 4: Deploy
 [ ] Server in produzione
 [ ] Nginx configurato
 [ ] SSL attivo

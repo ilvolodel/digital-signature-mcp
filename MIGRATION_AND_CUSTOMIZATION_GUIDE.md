@@ -8,13 +8,12 @@
 
 1. [Panoramica del Repository Attuale](#1-panoramica-del-repository-attuale)
 2. [Obiettivi del Progetto](#2-obiettivi-del-progetto)
-3. [Task 1: Migrazione su GitHub Personale](#3-task-1-migrazione-su-github-personale)
-4. [Task 2: Modifica degli Endpoint e Dominio](#4-task-2-modifica-degli-endpoint-e-dominio)
-5. [Task 3: Posizionamento Personalizzabile del Talloncino](#5-task-3-posizionamento-personalizzabile-del-talloncino)
-6. [Task 4: Conversione Automatica in PDF/A](#6-task-4-conversione-automatica-in-pdfa)
-7. [Configurazione Finale](#7-configurazione-finale)
-8. [Testing](#8-testing)
-9. [Note Tecniche Importanti](#9-note-tecniche-importanti)
+3. [Task 1: Modifica degli Endpoint e Dominio](#3-task-1-modifica-degli-endpoint-e-dominio)
+4. [Task 2: Posizionamento Personalizzabile del Talloncino](#4-task-2-posizionamento-personalizzabile-del-talloncino)
+5. [Task 3: Conversione Automatica in PDF/A](#5-task-3-conversione-automatica-in-pdfa)
+6. [Configurazione Finale](#6-configurazione-finale)
+7. [Testing](#7-testing)
+8. [Note Tecniche Importanti](#8-note-tecniche-importanti)
 
 ---
 
@@ -116,86 +115,21 @@ signature_fields.append({
 
 ## 2. OBIETTIVI DEL PROGETTO
 
-### 2.1 Task da Implementare
+### 2.1 Repository
 
-1. ✅ **Migrazione Repository**: Clonare e ripubblicare su GitHub personale
-2. ✅ **Modifica Endpoint**: Cambiare path MCP ed esporre su dominio personalizzato
-3. ✅ **Posizionamento Firma**: Permettere scelta posizione talloncino su PDF
-4. ✅ **Conversione PDF/A**: Convertire automaticamente tutti i file in PDF/A prima della firma
+✅ **Migrazione Completata**: Il repository è stato migrato su **https://github.com/ilvolodel/digital-signature-mcp**
 
----
+### 2.2 Task da Implementare
 
-## 3. TASK 1: MIGRAZIONE SU GITHUB PERSONALE
-
-### 3.1 Prerequisiti
-
-- Account GitHub personale
-- Git configurato localmente
-- GITHUB_TOKEN con permessi `repo` (se necessario per operazioni automatiche)
-
-### 3.2 Comandi per la Migrazione
-
-```bash
-# 1. Il repository è già clonato in /workspace/digital-signature-mcp
-cd /workspace/digital-signature-mcp
-
-# 2. Verifica remote attuale
-git remote -v
-# Output: origin  https://github.com/AI-Blackbird/digital-signature-mcp.git
-
-# 3. Rimuovi remote origin esistente
-git remote remove origin
-
-# 4. Aggiungi nuovo remote verso il tuo GitHub
-# SOSTITUISCI: <TUO_USERNAME> con il tuo username GitHub
-# SOSTITUISCI: <TUO_REPO_NAME> con il nome che vuoi dare al repo
-git remote add origin https://github.com/<TUO_USERNAME>/<TUO_REPO_NAME>.git
-
-# 5. Verifica la configurazione
-git remote -v
-
-# 6. Crea un nuovo branch (opzionale, ma raccomandato)
-git checkout -b main-custom
-
-# 7. Push al nuovo repository
-# NOTA: Se il repository non esiste su GitHub, crealo prima tramite interfaccia web
-git push -u origin main-custom
-
-# OPPURE, se vuoi mantenere il branch main:
-git push -u origin main
-```
-
-### 3.3 Creazione Repository su GitHub (via API)
-
-Se preferisci creare il repository via API:
-
-```bash
-# Usando curl e GITHUB_TOKEN
-curl -X POST https://api.github.com/user/repos \
-  -H "Authorization: token ${GITHUB_TOKEN}" \
-  -H "Accept: application/vnd.github.v3+json" \
-  -d '{
-    "name": "digital-signature-mcp-custom",
-    "description": "Custom Digital Signature MCP Server with PDF/A support",
-    "private": false,
-    "auto_init": false
-  }'
-```
-
-### 3.4 Verifica Post-Migrazione
-
-```bash
-# Verifica che il repository sia stato creato correttamente
-git log --oneline --max-count=5
-git branch -a
-git remote show origin
-```
+1. ✅ **Modifica Endpoint**: Cambiare path MCP ed esporre su dominio personalizzato
+2. ✅ **Posizionamento Firma**: Permettere scelta posizione talloncino su PDF
+3. ✅ **Conversione PDF/A**: Convertire automaticamente tutti i file in PDF/A prima della firma
 
 ---
 
-## 4. TASK 2: MODIFICA DEGLI ENDPOINT E DOMINIO
+## 3. TASK 1: MODIFICA DEGLI ENDPOINT E DOMINIO
 
-### 4.1 Endpoint MCP da Modificare
+### 3.1 Endpoint MCP da Modificare
 
 **File**: `app/main.py` (righe 16-23)
 
@@ -235,7 +169,7 @@ mcp = FastMCP(
 )
 ```
 
-### 4.2 Configurazione Variabili d'Ambiente
+### 3.2 Configurazione Variabili d'Ambiente
 
 **Opzione 1**: Aggiungere variabili configurabili
 
@@ -294,7 +228,7 @@ MCP_MESSAGE_PATH=/api/signature/messages/
 MCP_SERVER_NAME=Custom Signature MCP Server
 ```
 
-### 4.3 Configurazione Dominio e Reverse Proxy
+### 3.3 Configurazione Dominio e Reverse Proxy
 
 Per esporre il server su un dominio personalizzato, avrai bisogno di un reverse proxy (es. Nginx).
 
@@ -366,7 +300,7 @@ sudo systemctl restart nginx
 sudo certbot --nginx -d tuo-dominio.com
 ```
 
-### 4.4 Docker Compose con Variabili Custom
+### 3.4 Docker Compose con Variabili Custom
 
 **File**: `docker-compose.yml`
 
@@ -397,9 +331,9 @@ networks:
 
 ---
 
-## 5. TASK 3: POSIZIONAMENTO PERSONALIZZABILE DEL TALLONCINO
+## 4. TASK 2: POSIZIONAMENTO PERSONALIZZABILE DEL TALLONCINO
 
-### 5.1 Analisi del Codice Attuale
+### 4.1 Analisi del Codice Attuale
 
 **File**: `app/main.py` (righe 566-581)
 
@@ -411,7 +345,7 @@ Le coordinate attuali sono **hardcoded**:
 
 Questo posiziona la firma nell'**angolo in basso a destra**.
 
-### 5.2 Sistema di Coordinate PDF
+### 4.2 Sistema di Coordinate PDF
 
 Nel sistema di coordinate PDF:
 - Origine (0,0) è nell'**angolo in basso a sinistra**
@@ -419,7 +353,7 @@ Nel sistema di coordinate PDF:
 - Y cresce verso l'alto
 - Dimensioni standard pagina A4: **595 x 842 punti**
 
-### 5.3 Posizioni Predefinite Comuni
+### 4.3 Posizioni Predefinite Comuni
 
 | Posizione | llx | lly | urx | ury | Descrizione |
 |-----------|-----|-----|-----|-----|-------------|
@@ -431,7 +365,7 @@ Nel sistema di coordinate PDF:
 | Alto Destra | 500 | 752 | 580 | 782 | Angolo in alto a destra |
 | Centro Pagina | 247 | 396 | 327 | 426 | Centro della pagina |
 
-### 5.4 Implementazione del Sistema di Posizionamento
+### 4.4 Implementazione del Sistema di Posizionamento
 
 **Opzione 1: Posizioni Predefinite (Raccomandato per Semplicità)**
 
@@ -634,7 +568,7 @@ Returns:
 """
 ```
 
-### 5.5 Esempio di Utilizzo
+### 4.5 Esempio di Utilizzo
 
 **Posizione Predefinita**:
 ```python
@@ -671,9 +605,9 @@ sign_document(
 
 ---
 
-## 6. TASK 4: CONVERSIONE AUTOMATICA IN PDF/A
+## 5. TASK 3: CONVERSIONE AUTOMATICA IN PDF/A
 
-### 6.1 Requisiti
+### 5.1 Requisiti
 
 Il sistema deve:
 1. **Accettare qualsiasi file** (DOC, DOCX, TXT, immagini, etc.)
@@ -682,7 +616,7 @@ Il sistema deve:
 4. **Convertire PDF non-compliant in PDF/A**
 5. **Mantenere la qualità del documento originale**
 
-### 6.2 Librerie Necessarie
+### 5.2 Librerie Necessarie
 
 **File**: `requirements.txt`
 
@@ -742,7 +676,7 @@ ENV PYTHONPATH=/app
 CMD fastmcp run ./app/main.py:mcp --transport sse --host 0.0.0.0 --port ${PORT}
 ```
 
-### 6.3 Implementazione delle Funzioni di Conversione
+### 5.3 Implementazione delle Funzioni di Conversione
 
 **File**: `app/pdf_converter.py` (NUOVO FILE)
 
@@ -1084,7 +1018,7 @@ class PDFAConverter:
 pdf_converter = PDFAConverter()
 ```
 
-### 6.4 Integrazione nel Tool sign_document
+### 5.4 Integrazione nel Tool sign_document
 
 **File**: `app/main.py`
 
@@ -1202,7 +1136,7 @@ upload_info["pdfa_conversion"] = conversion_message
 return upload_info
 ```
 
-### 6.5 Aggiornamento Dockerfile per LibreOffice (Opzionale)
+### 5.5 Aggiornamento Dockerfile per LibreOffice (Opzionale)
 
 Se vuoi supportare la conversione di file Office, modifica il Dockerfile:
 
@@ -1240,7 +1174,7 @@ RUN apt-get update && apt-get install -y \
 
 **NOTA**: LibreOffice aumenta significativamente la dimensione dell'immagine Docker (~500MB). Se non hai bisogno di convertire file Office, ometti questa parte.
 
-### 6.6 Testing della Conversione PDF/A
+### 5.6 Testing della Conversione PDF/A
 
 **Script di Test** (crea file `test_pdfa_conversion.py` nella root):
 
@@ -1310,9 +1244,9 @@ docker-compose exec signature-server python /app/test_pdfa_conversion.py
 
 ---
 
-## 7. CONFIGURAZIONE FINALE
+## 6. CONFIGURAZIONE FINALE
 
-### 7.1 File .env Completo
+### 6.1 File .env Completo
 
 **File**: `.env`
 
@@ -1344,7 +1278,7 @@ PDFA_DEFAULT_VERSION=2  # 1, 2, or 3
 PDFA_IMAGE_COMPRESSION=jpeg  # jpeg or lossless
 ```
 
-### 7.2 Struttura File Finale
+### 6.2 Struttura File Finale
 
 ```
 digital-signature-mcp-custom/
@@ -1365,7 +1299,7 @@ digital-signature-mcp-custom/
         └── setting.py        # Con nuove variabili
 ```
 
-### 7.3 Comandi per Build e Deploy
+### 6.3 Comandi per Build e Deploy
 
 ```bash
 # 1. Build dell'immagine Docker
@@ -1391,9 +1325,9 @@ docker-compose up -d
 
 ---
 
-## 8. TESTING
+## 7. TESTING
 
-### 8.1 Test Endpoint MCP
+### 7.1 Test Endpoint MCP
 
 ```bash
 # Test SSE endpoint
@@ -1405,7 +1339,7 @@ curl -X POST http://localhost:8888/api/signature/messages/ \
   -d '{"jsonrpc": "2.0", "method": "tools/list", "id": 1}'
 ```
 
-### 8.2 Test Conversione PDF/A
+### 7.2 Test Conversione PDF/A
 
 **Crea file** `test_sign_with_pdfa.py`:
 
@@ -1467,7 +1401,7 @@ if __name__ == "__main__":
     test_full_flow()
 ```
 
-### 8.3 Test Posizionamento Firma
+### 7.3 Test Posizionamento Firma
 
 **Testa tutte le posizioni predefinite**:
 
@@ -1502,7 +1436,7 @@ custom_coords = {
 # Chiama sign_document con custom_coords
 ```
 
-### 8.4 Checklist di Verifica
+### 7.4 Checklist di Verifica
 
 - [ ] Repository migrato su GitHub personale
 - [ ] Endpoint MCP modificati (sse_path e message_path)
@@ -1521,9 +1455,9 @@ custom_coords = {
 
 ---
 
-## 9. NOTE TECNICHE IMPORTANTI
+## 8. NOTE TECNICHE IMPORTANTI
 
-### 9.1 Limiti e Considerazioni
+### 8.1 Limiti e Considerazioni
 
 1. **Dimensione File**:
    - DigitalOcean Spaces: limite per singolo PUT è 5GB
@@ -1546,7 +1480,7 @@ custom_coords = {
    - Valida sempre input utente
    - Sanitizza nomi file per evitare path traversal
 
-### 9.2 Troubleshooting Comune
+### 8.2 Troubleshooting Comune
 
 **Problema**: `ocrmypdf` fallisce con errore Ghostscript
 **Soluzione**: Verifica che Ghostscript sia installato: `gs --version`
@@ -1563,7 +1497,7 @@ custom_coords = {
 **Problema**: Docker build fallisce per spazio disco
 **Soluzione**: Rimuovi immagini inutilizzate: `docker system prune -a`
 
-### 9.3 Ottimizzazioni Future
+### 8.3 Ottimizzazioni Future
 
 1. **Cache Conversioni**:
    - Salva conversioni PDF/A già effettuate
@@ -1585,7 +1519,7 @@ custom_coords = {
    - Integra con Prometheus per metriche
    - Log strutturati con JSON
 
-### 9.4 Risorse Utili
+### 8.4 Risorse Utili
 
 - **FastMCP Docs**: https://github.com/jlowin/fastmcp
 - **pyHanko Docs**: https://pyhanko.readthedocs.io/
@@ -1595,7 +1529,7 @@ custom_coords = {
 - **Infocert API**: Documentazione fornita da Infocert
 - **DigitalOcean Spaces**: https://docs.digitalocean.com/products/spaces/
 
-### 9.5 Contatti e Supporto
+### 8.5 Contatti e Supporto
 
 Per domande o problemi con l'implementazione:
 1. Controlla i log Docker: `docker-compose logs -f`

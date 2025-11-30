@@ -11,6 +11,17 @@ from datetime import datetime
 from urllib.parse import urlparse, urlunparse, unquote
 from app.config.setting import settings
 from pyhanko.pdf_utils.reader import PdfFileReader
+from io import BytesIO
+try:
+    from PyPDF2 import PdfReader
+    PYPDF2_AVAILABLE = True
+except ImportError:
+    PYPDF2_AVAILABLE = False
+try:
+    import pdfplumber
+    PDFPLUMBER_AVAILABLE = True
+except ImportError:
+    PDFPLUMBER_AVAILABLE = False
 
 # MCP server configuration with additional options
 mcp = FastMCP(
@@ -530,6 +541,167 @@ def authorize_smsp(
         }
 
 @mcp.tool(
+    name="analyze_pdf_signature_fields",
+    description="Analizza un documento PDF per trovare suggerimenti su dove posizionare la firma digitale. Cerca campi AcroForm esistenti e parole chiave come 'Firma', 'Signature', 'Sottoscritto'.",
+    tags=["pdf", "analysis", "signature"]
+)
+def analyze_pdf_signature_fields(
+    link_pdf: Annotated[str, Field(description="URL del documento PDF da analizzare")]
+) -> dict:
+    """
+    Analizza un PDF per trovare suggerimenti sul posizionamento della firma.
+    
+    Cerca:
+    1. Campi AcroForm signature fields (campi firma interattivi standard)
+    2. Parole chiave testuali: "Firma", "Signature", "Sottoscritto", "Firmatario"
+    3. Pattern di linee: "______", ".....", "-----"
+    
+    Args:
+        link_pdf: URL del PDF da analizzare
+        
+    Returns:
+        dict con:
+        - total_pages: numero totale di pagine
+        - has_acroform_fields: bool, se ha campi firma standard
+        - acroform_fields: lista di campi AcroForm trovati
+        - text_hints: lista di suggerimenti testuali trovati
+        - recommendation: suggerimento finale per l'utente
+        - suggested_positions: posizioni disponibili per firmare
+    """
+    result = {
+        "total_pages": 0,
+        "has_acroform_fields": False,
+        "acroform_fields": [],
+        "text_hints": [],
+        "recommendation": "",
+        "suggested_positions": [
+            "bottom-right", "bottom-left", "bottom-center",
+            "top-right", "top-left", "top-center", "center"
+        ],
+        "analysis_status": "success"
+    }
+    
+    try:
+        # Scarica il PDF
+        response = requests.get(link_pdf, timeout=30)
+        response.raise_for_status()
+        pdf_bytes = BytesIO(response.content)
+        
+        # FASE 1: Cerca campi AcroForm con PyPDF2
+        if PYPDF2_AVAILABLE:
+            try:
+                pdf_reader = PdfReader(pdf_bytes)
+                result["total_pages"] = len(pdf_reader.pages)
+                
+                # Cerca campi AcroForm
+                if "/AcroForm" in pdf_reader.trailer.get("/Root", {}):
+                    acro_form = pdf_reader.trailer["/Root"]["/AcroForm"]
+                    if "/Fields" in acro_form:
+                        fields = acro_form["/Fields"]
+                        for field_ref in fields:
+                            field_obj = field_ref.get_object()
+                            field_type = field_obj.get("/FT", "")
+                            field_name = field_obj.get("/T", "")
+                            
+                            # Cerca signature fields
+                            if field_type == "/Sig" or "signature" in str(field_name).lower() or "firma" in str(field_name).lower():
+                                result["has_acroform_fields"] = True
+                                result["acroform_fields"].append({
+                                    "name": str(field_name),
+                                    "type": "AcroForm Signature Field",
+                                    "description": f"Campo firma interattivo: {field_name}"
+                                })
+            except Exception as e:
+                result["analysis_status"] = f"partial (PyPDF2 error: {str(e)})"
+        
+        # FASE 2: Cerca parole chiave con pdfplumber
+        if PDFPLUMBER_AVAILABLE:
+            try:
+                pdf_bytes.seek(0)
+                keywords = ["firma", "signature", "sottoscritto", "firmatario", "sign here", "sign:", "firma:"]
+                line_patterns = ["_____", ".....", "-----"]
+                
+                with pdfplumber.open(pdf_bytes) as pdf:
+                    if result["total_pages"] == 0:
+                        result["total_pages"] = len(pdf.pages)
+                    
+                    for page_num, page in enumerate(pdf.pages, start=1):
+                        text = page.extract_text()
+                        if not text:
+                            continue
+                        
+                        text_lower = text.lower()
+                        
+                        # Cerca keywords
+                        for keyword in keywords:
+                            if keyword in text_lower:
+                                # Trova posizione nel testo
+                                words = page.extract_words()
+                                for word in words:
+                                    if keyword in word["text"].lower():
+                                        # Determina posizione approssimativa
+                                        page_height = page.height
+                                        y_position = word["top"]
+                                        
+                                        # Classifica posizione (top/middle/bottom)
+                                        if y_position < page_height / 3:
+                                            position = "top"
+                                        elif y_position > 2 * page_height / 3:
+                                            position = "bottom"
+                                        else:
+                                            position = "middle"
+                                        
+                                        result["text_hints"].append({
+                                            "keyword": keyword,
+                                            "page": page_num,
+                                            "text": word["text"],
+                                            "position": position,
+                                            "description": f"Trovato '{word['text']}' a pagina {page_num} ({position})"
+                                        })
+                                        break  # Una keyword per pagina è sufficiente
+                        
+                        # Cerca pattern di linee
+                        for pattern in line_patterns:
+                            if pattern in text:
+                                result["text_hints"].append({
+                                    "keyword": "line_pattern",
+                                    "page": page_num,
+                                    "text": pattern,
+                                    "position": "unknown",
+                                    "description": f"Trovato pattern linea '{pattern}' a pagina {page_num}"
+                                })
+                                break
+            except Exception as e:
+                result["analysis_status"] = f"partial (pdfplumber error: {str(e)})"
+        
+        # FASE 3: Genera raccomandazione
+        if result["has_acroform_fields"]:
+            first_field = result["acroform_fields"][0]
+            result["recommendation"] = f"✅ Trovato campo firma predefinito: '{first_field['name']}'. Consiglio di usarlo per una firma standard."
+        elif result["text_hints"]:
+            first_hint = result["text_hints"][0]
+            result["recommendation"] = f"💡 Trovato '{first_hint['keyword']}' a pagina {first_hint['page']} ({first_hint['position']}). Suggerisco di firmare su quella pagina in posizione '{first_hint['position']}-right' o '{first_hint['position']}-left'."
+        else:
+            result["recommendation"] = f"📄 Nessun campo firma trovato nel documento ({result['total_pages']} pagine). Suggerisco di chiedere all'utente dove preferisce firmare. Posizioni disponibili: {', '.join(result['suggested_positions'])}."
+        
+        return result
+        
+    except RequestException as e:
+        return {
+            "analysis_status": "error",
+            "error": f"Errore nel download del PDF: {str(e)}",
+            "recommendation": "Impossibile analizzare il documento. Chiedi all'utente dove vuole firmare.",
+            "suggested_positions": ["bottom-right", "bottom-left", "bottom-center", "top-right", "top-left", "top-center", "center"]
+        }
+    except Exception as e:
+        return {
+            "analysis_status": "error",
+            "error": f"Errore nell'analisi: {str(e)}",
+            "recommendation": "Errore durante l'analisi. Chiedi all'utente dove vuole firmare.",
+            "suggested_positions": ["bottom-right", "bottom-left", "bottom-center", "top-right", "top-left", "top-center", "center"]
+        }
+
+@mcp.tool(
     name="sign_document",
     description="Firma digitalmente un documento PDF utilizzando il servizio Infocert. Questo tool scarica il documento dal link fornito, lo firma con il certificato specificato, converte il risultato in PDF e lo carica automaticamente su DigitalOcean Spaces.",
     tags=["signature", "services", "storage"]
@@ -544,6 +716,7 @@ def sign_document(
     page_signature: Annotated[str, Field(description="Pagina dove posizionare la firma: 'prima_pagina', 'ultima_pagina', o 'tutte_le_pagine' (default: 'ultima_pagina')", default="ultima_pagina")] = "tutte_le_pagine",
     signature_position: Annotated[str, Field(description="Posizione del talloncino: 'bottom-right', 'bottom-left', 'bottom-center', 'top-right', 'top-left', 'top-center', 'center', 'custom' (default: 'bottom-right')", default="bottom-right")] = "bottom-right",
     custom_coords: Annotated[Optional[Dict[str, int]], Field(description="Coordinate personalizzate se signature_position='custom': {'llx': int, 'lly': int, 'urx': int, 'ury': int}")] = None,
+    use_existing_field: Annotated[Optional[str], Field(description="Nome del campo AcroForm da usare per la firma (se il PDF ha campi firma predefiniti). Se specificato, ignora signature_position e custom_coords.")] = None,
 ) -> dict:
     """
     Firma digitalmente un documento PDF utilizzando il servizio Infocert.
@@ -570,6 +743,8 @@ def sign_document(
                                   'top-right', 'top-left', 'top-center', 'center', 'custom'
         custom_coords (dict): Coordinate personalizzate quando signature_position='custom': 
                               {'llx': int, 'lly': int, 'urx': int, 'ury': int}
+        use_existing_field (str): Nome del campo AcroForm esistente da usare (opzionale). Se specificato, 
+                                  ignora signature_position e custom_coords e usa il campo predefinito del PDF.
         
     Returns:
         dict: Risposta della firma contenente:
@@ -664,13 +839,27 @@ def sign_document(
             "Transaction-Id": transaction_id
         }
 
-        # Calcola le coordinate del talloncino di firma
-        coords = get_signature_position(
-            position=signature_position,
-            page_width=595,  # A4 standard
-            page_height=842,  # A4 standard
-            custom_coords=custom_coords
-        )
+        # Gestione campo AcroForm esistente vs posizione custom
+        if use_existing_field:
+            # Usa campo AcroForm esistente - Le coordinate verranno gestite dal campo stesso
+            # Per ora usiamo coordinate standard, in futuro si possono estrarre dal PDF
+            coords = {
+                "llx": 0,
+                "lly": 0, 
+                "urx": 0,
+                "ury": 0,
+                "use_acroform": True,
+                "field_name": use_existing_field
+            }
+        else:
+            # Calcola le coordinate del talloncino di firma
+            coords = get_signature_position(
+                position=signature_position,
+                page_width=595,  # A4 standard
+                page_height=842,  # A4 standard
+                custom_coords=custom_coords
+            )
+            coords["use_acroform"] = False
         
         # Crea l'array signatureFields dinamico per ogni pagina
         signature_fields = []
